@@ -1,58 +1,85 @@
 import {
-  collection,
   addDoc,
+  collection,
   doc,
-  setDoc,
-  updateDoc,
-  getDoc,
   getDocs,
-  query,
-  where,
-  orderBy,
   onSnapshot,
+  orderBy as firestoreOrderBy,
+  query,
   serverTimestamp,
-  Timestamp
-} from 'https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js';
-import { db } from '../firebase-config.js';
+  Timestamp,
+  updateDoc
+} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+
+import { db } from "../firebase-config.js";
 
 export const refs = {
-  users: collection(db, 'users'),
-  products: collection(db, 'products'),
-  sales: collection(db, 'sales'),
-  deliveries: collection(db, 'deliveries'),
-  settings: collection(db, 'settings')
+  users: collection(db, "users"),
+  products: collection(db, "products"),
+  sales: collection(db, "sales"),
+  deliveries: collection(db, "deliveries"),
+  settings: collection(db, "settings")
 };
 
-export const serverNow = () => serverTimestamp();
-export const timestampFromDateTime = (date, time = '00:00') => Timestamp.fromDate(new Date(`${date}T${time}:00`));
-
-export async function createDoc(collectionRef, data) {
-  return addDoc(collectionRef, { ...data, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+export function orderBy(field, direction = "asc") {
+  return firestoreOrderBy(field, direction);
 }
 
-export async function createDocWithId(path, id, data) {
-  return setDoc(doc(db, path, id), { ...data, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+export async function createDoc(collectionRef, payload = {}) {
+  const data = {
+    ...payload,
+    createdAt: payload.createdAt || serverTimestamp(),
+    updatedAt: serverTimestamp()
+  };
+
+  const created = await addDoc(collectionRef, data);
+  return created.id;
 }
 
-export async function updateByPath(path, id, data) {
-  return updateDoc(doc(db, path, id), { ...data, updatedAt: serverTimestamp() });
+export async function updateByPath(collectionName, documentId, payload = {}) {
+  const ref = doc(db, collectionName, documentId);
+
+  await updateDoc(ref, {
+    ...payload,
+    updatedAt: serverTimestamp()
+  });
+
+  return true;
 }
 
-export async function getByPath(path, id) {
-  return getDoc(doc(db, path, id));
+export async function listCollection(collectionName, queryConstraints = []) {
+  const ref = collection(db, collectionName);
+  const q = query(ref, ...queryConstraints);
+  const snap = await getDocs(q);
+
+  return snap.docs.map((item) => ({
+    id: item.id,
+    ...item.data()
+  }));
 }
 
-export async function listCollection(name, constraints = []) {
-  const q = query(collection(db, name), ...constraints);
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
-}
+export function subscribeCollection(collectionName, queryConstraints = [], callback) {
+  const ref = collection(db, collectionName);
+  const q = query(ref, ...queryConstraints);
 
-export function subscribeCollection(name, constraints, callback) {
-  const q = query(collection(db, name), ...constraints);
-  return onSnapshot(q, (snapshot) => {
-    callback(snapshot.docs.map((item) => ({ id: item.id, ...item.data() })));
+  return onSnapshot(q, (snap) => {
+    const rows = snap.docs.map((item) => ({
+      id: item.id,
+      ...item.data()
+    }));
+
+    callback(rows);
   });
 }
 
-export { where, orderBy, getDocs, query, doc, setDoc, getDoc };
+export function timestampFromDateTime(dateValue, timeValue) {
+  if (!dateValue) {
+    return Timestamp.now();
+  }
+
+  const safeTime = timeValue || "00:00";
+  const iso = `${dateValue}T${safeTime}:00`;
+  const date = new Date(iso);
+
+  return Timestamp.fromDate(date);
+}
