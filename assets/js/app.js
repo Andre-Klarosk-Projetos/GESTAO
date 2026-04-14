@@ -1,6 +1,37 @@
-import { login, watchAuth, logout, createManagedUser, updateManagedUser, deleteManagedUser, changeCurrentPassword, listUsers } from './services/auth.js';
-import { refs, createDoc, updateByPath, listCollection, subscribeCollection, orderBy, timestampFromDateTime } from './services/db.js';
-import { AREAS, ROLES, currency, toNumber, formatDate, formatDateTime, formatRole, hasPermission, paymentMethods, deliveryStatuses, ensurePermissionsByRole } from './services/utils.js';
+import {
+  login,
+  watchAuth,
+  logout,
+  createManagedUser,
+  updateManagedUser,
+  deleteManagedUser,
+  changeCurrentPassword,
+  listUsers
+} from './services/auth.js';
+
+import {
+  refs,
+  createDoc,
+  updateByPath,
+  listCollection,
+  subscribeCollection,
+  orderBy,
+  timestampFromDateTime
+} from './services/db.js';
+
+import {
+  AREAS,
+  ROLES,
+  currency,
+  toNumber,
+  formatDate,
+  formatDateTime,
+  formatRole,
+  hasPermission,
+  paymentMethods,
+  deliveryStatuses,
+  ensurePermissionsByRole
+} from './services/utils.js';
 
 const els = {
   authView: document.getElementById('auth-view'),
@@ -38,7 +69,12 @@ const state = {
   products: [],
   sales: [],
   deliveries: [],
-  settings: { storeName: 'Minha Loja', address: 'Endereço da loja', lowStockThreshold: 5, warrantyText: 'Garantia conforme política interna da loja.' },
+  settings: {
+    storeName: 'Minha Loja',
+    address: 'Endereço da loja',
+    lowStockThreshold: 5,
+    warrantyText: 'Garantia conforme política interna da loja.'
+  },
   activeTab: 'dashboard',
   editingProductId: null,
   editingUserId: null,
@@ -53,7 +89,13 @@ function showFeedback(message, type = '') {
 }
 
 function escapeHtml(value = '') {
-  return String(value).replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\'' : '&#39;', '"': '&quot;' }[char]));
+  return String(value).replace(/[&<>'"]/g, (char) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '\'': '&#39;',
+    '"': '&quot;'
+  }[char]));
 }
 
 function renderApp() {
@@ -75,6 +117,7 @@ function setMainView(isAuthenticated) {
 
 function refreshNavigationPermissions() {
   const buttons = [...els.nav.querySelectorAll('.nav-item')];
+
   buttons.forEach((button) => {
     const tab = button.dataset.tab;
     const allowed = hasPermission(state.currentUser, tab);
@@ -89,6 +132,7 @@ function refreshNavigationPermissions() {
 
 function activateTab(tab) {
   state.activeTab = tab;
+
   const titleMap = {
     dashboard: 'Dashboard',
     sales: 'Vendas',
@@ -99,8 +143,14 @@ function activateTab(tab) {
     settings: 'Configurações'
   };
 
-  [...els.nav.querySelectorAll('.nav-item')].forEach((btn) => btn.classList.toggle('active', btn.dataset.tab === tab));
-  Object.entries(tabEls).forEach(([key, el]) => el.classList.toggle('active', key === tab));
+  [...els.nav.querySelectorAll('.nav-item')].forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.tab === tab);
+  });
+
+  Object.entries(tabEls).forEach(([key, el]) => {
+    el.classList.toggle('active', key === tab);
+  });
+
   els.pageTitle.textContent = titleMap[tab] || 'Painel';
   document.querySelector('.sidebar')?.classList.remove('open');
 }
@@ -131,21 +181,30 @@ async function bootstrapData() {
     renderDashboard();
   }));
 
-  if (state.currentUser?.role === 'Administrador') {
+  if (hasPermission(state.currentUser, 'users')) {
     state.users = await listUsers();
     renderUsers();
+  } else {
+    state.users = [];
   }
 
   const settingsList = await listCollection('settings');
   const systemSettings = settingsList.find((item) => item.scope === 'system');
-  if (systemSettings) state.settings = { ...state.settings, ...systemSettings };
+
+  if (systemSettings) {
+    state.settings = { ...state.settings, ...systemSettings };
+  }
+
   renderSettings();
   renderStockAlerts();
 }
 
 function renderDashboard() {
   const lowStock = getLowStockProducts();
-  const todaySales = state.sales.filter((sale) => new Date(sale.createdAt?.toDate?.() || sale.createdAt || 0).toDateString() === new Date().toDateString());
+  const todaySales = state.sales.filter((sale) => {
+    return new Date(sale.createdAt?.toDate?.() || sale.createdAt || 0).toDateString() === new Date().toDateString();
+  });
+
   const todayRevenue = todaySales.reduce((sum, sale) => sum + Number(sale.total || 0), 0);
   const activeDeliveries = state.deliveries.filter((item) => ['Agendado', 'Em rota', 'Reagendado', 'Recolhimento'].includes(item.status));
   const totalStock = state.products.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
@@ -189,7 +248,10 @@ function renderDashboard() {
 }
 
 function renderSimpleList(items) {
-  if (!items.length) return '<div class="empty-state">Nada para exibir.</div>';
+  if (!items.length) {
+    return '<div class="empty-state">Nada para exibir.</div>';
+  }
+
   return `<div class="list-group">${items.map((text) => `<div class="list-item">${escapeHtml(text)}</div>`).join('')}</div>`;
 }
 
@@ -262,25 +324,48 @@ function renderProducts() {
 
   if (state.editingProductId) {
     const editing = state.products.find((item) => item.id === state.editingProductId);
-    if (editing) Object.entries(editing).forEach(([key, value]) => form.elements[key] && (form.elements[key].value = value ?? ''));
+
+    if (editing) {
+      Object.entries(editing).forEach(([key, value]) => {
+        if (form.elements[key]) {
+          form.elements[key].value = value ?? '';
+        }
+      });
+    }
   }
 
   form.addEventListener('submit', handleProductSubmit);
-  tabEls.products.querySelector('#product-reset-btn').addEventListener('click', () => { state.editingProductId = null; renderProducts(); });
-  tabEls.products.querySelector('#product-filter-btn').addEventListener('click', () => applyProductFilter(filterInput.value, statusFilter.value));
+  tabEls.products.querySelector('#product-reset-btn').addEventListener('click', () => {
+    state.editingProductId = null;
+    renderProducts();
+  });
+
+  tabEls.products.querySelector('#product-filter-btn').addEventListener('click', () => {
+    applyProductFilter(filterInput.value, statusFilter.value);
+  });
+
   bindProductTableActions(tabEls.products);
 }
 
 function bindProductTableActions(scope) {
-  scope.querySelectorAll('[data-product-edit]').forEach((btn) => btn.addEventListener('click', () => { state.editingProductId = btn.dataset.productEdit; renderProducts(); }));
-  scope.querySelectorAll('[data-product-delete]').forEach((btn) => btn.addEventListener('click', async () => {
-    await updateByPath('products', btn.dataset.productDelete, { deleted: true, status: 'inativo' });
-  }));
+  scope.querySelectorAll('[data-product-edit]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.editingProductId = btn.dataset.productEdit;
+      renderProducts();
+    });
+  });
+
+  scope.querySelectorAll('[data-product-delete]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      await updateByPath('products', btn.dataset.productDelete, { deleted: true, status: 'inativo' });
+    });
+  });
 }
 
 function applyProductFilter(text, status) {
   const tbody = tabEls.products.querySelector('#products-tbody');
   const term = text.trim().toLowerCase();
+
   const filtered = state.products.filter((product) => {
     const haystack = [product.name, product.barcode, product.supplier, product.brand, product.manufacturer].join(' ').toLowerCase();
     const matchesTerm = !term || haystack.includes(term);
@@ -290,10 +375,23 @@ function applyProductFilter(text, status) {
 
   tbody.innerHTML = filtered.map((product) => `
     <tr>
-      <td>${escapeHtml(product.name)}</td><td>${escapeHtml(product.serialNumber || '-')}</td><td>${escapeHtml(product.brand || '-')}</td><td>${escapeHtml(product.supplier || '-')}</td>
-      <td>${currency(product.costPrice)}</td><td>${currency(product.salePrice)}</td><td>${product.quantity ?? 0}</td><td>${product.status || 'ativo'}</td>
-      <td><div class="inline-row"><button class="btn btn-secondary" data-product-edit="${product.id}">Editar</button><button class="btn btn-danger" data-product-delete="${product.id}">Inativar</button></div></td>
-    </tr>`).join('') || '<tr><td colspan="9">Nenhum resultado encontrado.</td></tr>';
+      <td>${escapeHtml(product.name)}</td>
+      <td>${escapeHtml(product.serialNumber || '-')}</td>
+      <td>${escapeHtml(product.brand || '-')}</td>
+      <td>${escapeHtml(product.supplier || '-')}</td>
+      <td>${currency(product.costPrice)}</td>
+      <td>${currency(product.salePrice)}</td>
+      <td>${product.quantity ?? 0}</td>
+      <td>${product.status || 'ativo'}</td>
+      <td>
+        <div class="inline-row">
+          <button class="btn btn-secondary" data-product-edit="${product.id}">Editar</button>
+          <button class="btn btn-danger" data-product-delete="${product.id}">Inativar</button>
+        </div>
+      </td>
+    </tr>
+  `).join('') || '<tr><td colspan="9">Nenhum resultado encontrado.</td></tr>';
+
   bindProductTableActions(tabEls.products);
 }
 
@@ -301,6 +399,7 @@ async function handleProductSubmit(event) {
   event.preventDefault();
   const form = event.currentTarget;
   const payload = Object.fromEntries(new FormData(form).entries());
+
   payload.costPrice = toNumber(payload.costPrice);
   payload.salePrice = toNumber(payload.salePrice);
   payload.quantity = toNumber(payload.quantity);
@@ -313,6 +412,7 @@ async function handleProductSubmit(event) {
   } else {
     await createDoc(refs.products, payload);
   }
+
   form.reset();
 }
 
@@ -323,6 +423,7 @@ function renderSales() {
   }
 
   const cartTotal = calculateCartTotal();
+
   tabEls.sales.innerHTML = `
     <div class="sales-layout">
       <div class="panel">
@@ -336,7 +437,10 @@ function renderSales() {
         <div class="scanner-card" style="margin-top:14px;">
           <h3>Leitor por câmera</h3>
           <video id="barcode-video" class="video-preview" autoplay muted playsinline></video>
-          <div class="inline-row" style="margin-top:10px;"><span class="muted">Usa <span class="kbd">BarcodeDetector</span> quando disponível.</span><button id="stop-scan-btn" class="btn btn-secondary">Parar câmera</button></div>
+          <div class="inline-row" style="margin-top:10px;">
+            <span class="muted">Usa <span class="kbd">BarcodeDetector</span> quando disponível.</span>
+            <button id="stop-scan-btn" class="btn btn-secondary">Parar câmera</button>
+          </div>
         </div>
       </div>
       <div class="panel">
@@ -366,7 +470,14 @@ function renderSales() {
         <table>
           <thead><tr><th>Data</th><th>Cliente</th><th>Total</th><th>Pagamento</th><th>Itens</th></tr></thead>
           <tbody>
-            ${state.sales.slice(0, 10).map((sale) => `<tr><td>${formatDateTime(sale.createdAt)}</td><td>${escapeHtml(sale.customerName || 'Balcão')}</td><td>${currency(sale.total)}</td><td>${escapeHtml(sale.paymentMethod || '-')}</td><td>${sale.items?.length || 0}</td></tr>`).join('') || '<tr><td colspan="5">Nenhuma venda registrada.</td></tr>'}
+            ${state.sales.slice(0, 10).map((sale) => `
+              <tr>
+                <td>${formatDateTime(sale.createdAt)}</td>
+                <td>${escapeHtml(sale.customerName || 'Balcão')}</td>
+                <td>${currency(sale.total)}</td>
+                <td>${escapeHtml(sale.paymentMethod || '-')}</td>
+                <td>${sale.items?.length || 0}</td>
+              </tr>`).join('') || '<tr><td colspan="5">Nenhuma venda registrada.</td></tr>'}
           </tbody>
         </table>
       </div>
@@ -374,19 +485,36 @@ function renderSales() {
   `;
 
   tabEls.sales.querySelector('#sale-product-search-btn').addEventListener('click', handleSaleSearch);
-  tabEls.sales.querySelector('#sale-product-search').addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); handleSaleSearch(); } });
+  tabEls.sales.querySelector('#sale-product-search').addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      handleSaleSearch();
+    }
+  });
+
   tabEls.sales.querySelector('#sale-form').addEventListener('submit', handleSaleSubmit);
-  tabEls.sales.querySelector('#clear-cart-btn').addEventListener('click', () => { state.cart = []; renderSales(); });
+  tabEls.sales.querySelector('#clear-cart-btn').addEventListener('click', () => {
+    state.cart = [];
+    renderSales();
+  });
+
   tabEls.sales.querySelector('#camera-scan-btn').addEventListener('click', startCameraScan);
   tabEls.sales.querySelector('#stop-scan-btn').addEventListener('click', stopCameraScan);
   bindCartButtons();
+
   const discountField = tabEls.sales.querySelector('input[name="discount"]');
   const paidField = tabEls.sales.querySelector('input[name="amountPaid"]');
-  [discountField, paidField].forEach((field) => field.addEventListener('input', () => updateSaleSummary()));
+
+  [discountField, paidField].forEach((field) => {
+    field.addEventListener('input', () => updateSaleSummary());
+  });
 }
 
 function renderCartItems() {
-  if (!state.cart.length) return '<div class="empty-state">Nenhum item adicionado.</div>';
+  if (!state.cart.length) {
+    return '<div class="empty-state">Nenhum item adicionado.</div>';
+  }
+
   return state.cart.map((item) => `
     <div class="cart-item">
       <div class="cart-line"><strong>${escapeHtml(item.name)}</strong><span>${currency(item.salePrice)}</span></div>
@@ -403,7 +531,10 @@ function renderCartItems() {
 function handleSaleSearch() {
   const term = tabEls.sales.querySelector('#sale-product-search').value.trim().toLowerCase();
   const resultsEl = tabEls.sales.querySelector('#sale-search-results');
-  const results = state.products.filter((product) => product.status !== 'inativo' && [product.name, product.barcode].join(' ').toLowerCase().includes(term)).slice(0, 8);
+
+  const results = state.products
+    .filter((product) => product.status !== 'inativo' && [product.name, product.barcode].join(' ').toLowerCase().includes(term))
+    .slice(0, 8);
 
   resultsEl.innerHTML = results.map((product) => `
     <div class="list-item">
@@ -413,39 +544,66 @@ function handleSaleSearch() {
     </div>
   `).join('') || '<div class="empty-state">Nenhum produto encontrado.</div>';
 
-  resultsEl.querySelectorAll('[data-add-cart]').forEach((btn) => btn.addEventListener('click', () => addProductToCart(btn.dataset.addCart)));
+  resultsEl.querySelectorAll('[data-add-cart]').forEach((btn) => {
+    btn.addEventListener('click', () => addProductToCart(btn.dataset.addCart));
+  });
 }
 
 function addProductToCart(productId) {
   const product = state.products.find((item) => item.id === productId);
+
   if (!product) return;
+
   const existing = state.cart.find((item) => item.id === productId);
-  if (existing) existing.quantity += 1;
-  else state.cart.push({ id: product.id, name: product.name, salePrice: Number(product.salePrice || 0), quantity: 1, barcode: product.barcode });
+
+  if (existing) {
+    existing.quantity += 1;
+  } else {
+    state.cart.push({
+      id: product.id,
+      name: product.name,
+      salePrice: Number(product.salePrice || 0),
+      quantity: 1,
+      barcode: product.barcode
+    });
+  }
+
   renderSales();
   bindCartButtons();
 }
 
 function bindCartButtons() {
-  tabEls.sales.querySelectorAll('[data-cart-decrease]').forEach((btn) => btn.addEventListener('click', () => {
-    const item = state.cart.find((row) => row.id === btn.dataset.cartDecrease);
-    if (!item) return;
-    item.quantity = Math.max(1, item.quantity - 1);
-    renderSales();
-    bindCartButtons();
-  }));
-  tabEls.sales.querySelectorAll('[data-cart-increase]').forEach((btn) => btn.addEventListener('click', () => {
-    const item = state.cart.find((row) => row.id === btn.dataset.cartIncrease);
-    if (!item) return;
-    item.quantity += 1;
-    renderSales();
-    bindCartButtons();
-  }));
-  tabEls.sales.querySelectorAll('[data-cart-remove]').forEach((btn) => btn.addEventListener('click', () => {
-    state.cart = state.cart.filter((row) => row.id !== btn.dataset.cartRemove);
-    renderSales();
-    bindCartButtons();
-  }));
+  tabEls.sales.querySelectorAll('[data-cart-decrease]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const item = state.cart.find((row) => row.id === btn.dataset.cartDecrease);
+
+      if (!item) return;
+
+      item.quantity = Math.max(1, item.quantity - 1);
+      renderSales();
+      bindCartButtons();
+    });
+  });
+
+  tabEls.sales.querySelectorAll('[data-cart-increase]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const item = state.cart.find((row) => row.id === btn.dataset.cartIncrease);
+
+      if (!item) return;
+
+      item.quantity += 1;
+      renderSales();
+      bindCartButtons();
+    });
+  });
+
+  tabEls.sales.querySelectorAll('[data-cart-remove]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.cart = state.cart.filter((row) => row.id !== btn.dataset.cartRemove);
+      renderSales();
+      bindCartButtons();
+    });
+  });
 }
 
 function calculateCartTotal() {
@@ -456,6 +614,7 @@ function calculateCartTotal() {
   const total = Math.max(0, subtotal - discount);
   const amountPaid = toNumber(paidInput?.value || 0);
   const change = Math.max(0, amountPaid - total);
+
   return { subtotal, discount, total, amountPaid, change };
 }
 
@@ -469,10 +628,12 @@ function updateSaleSummary() {
 
 async function handleSaleSubmit(event) {
   event.preventDefault();
+
   if (!state.cart.length) {
     alert('Adicione ao menos um produto na venda.');
     return;
   }
+
   const form = event.currentTarget;
   const values = Object.fromEntries(new FormData(form).entries());
   const totals = calculateCartTotal();
@@ -481,6 +642,7 @@ async function handleSaleSubmit(event) {
     const product = state.products.find((row) => row.id === item.id);
     return !product || Number(product.quantity) < Number(item.quantity);
   });
+
   if (insufficient) {
     alert(`Estoque insuficiente para ${insufficient.name}.`);
     return;
@@ -496,14 +658,24 @@ async function handleSaleSubmit(event) {
     change: totals.change,
     cashierId: state.currentUser.uid,
     cashierName: state.currentUser.fullName,
-    items: state.cart.map((item) => ({ productId: item.id, name: item.name, quantity: item.quantity, unitPrice: item.salePrice, total: item.salePrice * item.quantity }))
+    items: state.cart.map((item) => ({
+      productId: item.id,
+      name: item.name,
+      quantity: item.quantity,
+      unitPrice: item.salePrice,
+      total: item.salePrice * item.quantity
+    }))
   };
 
   await createDoc(refs.sales, payload);
+
   for (const item of state.cart) {
     const product = state.products.find((row) => row.id === item.id);
-    await updateByPath('products', item.id, { quantity: Number(product.quantity) - Number(item.quantity) });
+    await updateByPath('products', item.id, {
+      quantity: Number(product.quantity) - Number(item.quantity)
+    });
   }
+
   printReceipt(payload);
   state.cart = [];
   form.reset();
@@ -529,6 +701,7 @@ function printReceipt(sale) {
       <hr>
       <p>${escapeHtml(state.settings.warrantyText)}</p>
     </div></body></html>`;
+
   const win = window.open('', '_blank');
   win.document.write(html);
   win.document.close();
@@ -541,21 +714,29 @@ let scanTimer = null;
 
 async function startCameraScan() {
   const video = document.getElementById('barcode-video');
+
   if (!('BarcodeDetector' in window)) {
     alert('BarcodeDetector não disponível neste navegador. Use pesquisa manual ou um navegador compatível no celular.');
     return;
   }
+
   stopCameraScan();
   streamRef = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
   video.srcObject = streamRef;
-  const detector = new BarcodeDetector({ formats: ['ean_13', 'ean_8', 'code_128', 'qr_code', 'upc_a', 'upc_e'] });
+
+  const detector = new BarcodeDetector({
+    formats: ['ean_13', 'ean_8', 'code_128', 'qr_code', 'upc_a', 'upc_e']
+  });
 
   scanTimer = window.setInterval(async () => {
     try {
       const codes = await detector.detect(video);
+
       if (!codes.length) return;
+
       const value = codes[0].rawValue;
       const match = state.products.find((item) => item.barcode === value);
+
       if (match) {
         addProductToCart(match.id);
         tabEls.sales.querySelector('#sale-product-search').value = value;
@@ -568,9 +749,16 @@ async function startCameraScan() {
 }
 
 function stopCameraScan() {
-  if (scanTimer) window.clearInterval(scanTimer);
+  if (scanTimer) {
+    window.clearInterval(scanTimer);
+  }
+
   scanTimer = null;
-  if (streamRef) streamRef.getTracks().forEach((track) => track.stop());
+
+  if (streamRef) {
+    streamRef.getTracks().forEach((track) => track.stop());
+  }
+
   streamRef = null;
 }
 
@@ -579,6 +767,7 @@ function renderReports() {
     tabEls.reports.innerHTML = renderBlocked();
     return;
   }
+
   const topSelling = getTopSelling(10);
   const lowSelling = getLowSelling(10);
   const lowStock = getLowStockProducts();
@@ -615,14 +804,20 @@ function renderReports() {
     event.preventDefault();
     const values = Object.fromEntries(new FormData(event.currentTarget).entries());
     const term = (values.term || '').toLowerCase();
+
     const filtered = state.products.filter((item) => {
       const haystack = [item.name, item.brand, item.barcode].join(' ').toLowerCase();
+
       return (!values.supplier || item.supplier === values.supplier)
         && (!values.manufacturer || item.manufacturer === values.manufacturer)
         && (!values.status || item.status === values.status)
         && (!term || haystack.includes(term));
     });
-    tabEls.reports.querySelector('#combined-report-result').innerHTML = reportTable(['Produto', 'Fornecedor', 'Fabricante', 'Qtd'], filtered.map((item) => [item.name, item.supplier || '-', item.manufacturer || '-', item.quantity]));
+
+    tabEls.reports.querySelector('#combined-report-result').innerHTML = reportTable(
+      ['Produto', 'Fornecedor', 'Fabricante', 'Qtd'],
+      filtered.map((item) => [item.name, item.supplier || '-', item.manufacturer || '-', item.quantity])
+    );
   });
 }
 
@@ -631,11 +826,15 @@ function reportTable(headers, rows) {
 }
 
 function uniqueOptions(field) {
-  return [...new Set(state.products.map((item) => item[field]).filter(Boolean))].sort().map((item) => `<option value="${escapeHtml(item)}">${escapeHtml(item)}</option>`).join('');
+  return [...new Set(state.products.map((item) => item[field]).filter(Boolean))]
+    .sort()
+    .map((item) => `<option value="${escapeHtml(item)}">${escapeHtml(item)}</option>`)
+    .join('');
 }
 
 function aggregateProducts(field) {
   const map = new Map();
+
   state.products.forEach((item) => {
     const key = item[field] || 'Não informado';
     const current = map.get(key) || { label: key, products: 0, qty: 0 };
@@ -643,19 +842,33 @@ function aggregateProducts(field) {
     current.qty += Number(item.quantity || 0);
     map.set(key, current);
   });
+
   return [...map.values()].sort((a, b) => b.qty - a.qty);
 }
 
 function getTopSelling(limit = 5) {
   const map = new Map();
-  state.sales.forEach((sale) => sale.items?.forEach((item) => map.set(item.name, (map.get(item.name) || 0) + Number(item.quantity || 0))));
-  return [...map.entries()].map(([name, qty]) => ({ name, qty })).sort((a, b) => b.qty - a.qty).slice(0, limit);
+
+  state.sales.forEach((sale) => {
+    sale.items?.forEach((item) => {
+      map.set(item.name, (map.get(item.name) || 0) + Number(item.quantity || 0));
+    });
+  });
+
+  return [...map.entries()]
+    .map(([name, qty]) => ({ name, qty }))
+    .sort((a, b) => b.qty - a.qty)
+    .slice(0, limit);
 }
 
 function getLowSelling(limit = 5) {
   const sold = getTopSelling(9999);
   const soldMap = new Map(sold.map((item) => [item.name, item.qty]));
-  return state.products.map((item) => ({ name: item.name, qty: soldMap.get(item.name) || 0 })).sort((a, b) => a.qty - b.qty).slice(0, limit);
+
+  return state.products
+    .map((item) => ({ name: item.name, qty: soldMap.get(item.name) || 0 }))
+    .sort((a, b) => a.qty - b.qty)
+    .slice(0, limit);
 }
 
 function getLowStockProducts() {
@@ -709,8 +922,10 @@ function renderDeliveries() {
   `;
 
   const form = tabEls.deliveries.querySelector('#delivery-form');
+
   if (state.editingDeliveryId) {
     const editing = state.deliveries.find((item) => item.id === state.editingDeliveryId);
+
     if (editing) {
       form.elements.clientName.value = editing.clientName || '';
       form.elements.phone.value = editing.phone || '';
@@ -726,12 +941,25 @@ function renderDeliveries() {
   }
 
   form.addEventListener('submit', handleDeliverySubmit);
-  tabEls.deliveries.querySelector('#delivery-reset-btn').addEventListener('click', () => { state.editingDeliveryId = null; renderDeliveries(); });
-  tabEls.deliveries.querySelectorAll('[data-delivery-edit]').forEach((btn) => btn.addEventListener('click', () => { state.editingDeliveryId = btn.dataset.deliveryEdit; renderDeliveries(); }));
-  tabEls.deliveries.querySelectorAll('[data-delivery-status]').forEach((btn) => btn.addEventListener('click', async () => {
-    const [id, status] = btn.dataset.deliveryStatus.split(':');
-    await updateByPath('deliveries', id, { status });
-  }));
+
+  tabEls.deliveries.querySelector('#delivery-reset-btn').addEventListener('click', () => {
+    state.editingDeliveryId = null;
+    renderDeliveries();
+  });
+
+  tabEls.deliveries.querySelectorAll('[data-delivery-edit]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.editingDeliveryId = btn.dataset.deliveryEdit;
+      renderDeliveries();
+    });
+  });
+
+  tabEls.deliveries.querySelectorAll('[data-delivery-status]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const [id, status] = btn.dataset.deliveryStatus.split(':');
+      await updateByPath('deliveries', id, { status });
+    });
+  });
 }
 
 function deliveryStatusClass(status) {
@@ -744,6 +972,7 @@ function deliveryStatusClass(status) {
 async function handleDeliverySubmit(event) {
   event.preventDefault();
   const data = Object.fromEntries(new FormData(event.currentTarget).entries());
+
   data.amount = toNumber(data.amount);
   data.scheduledAt = timestampFromDateTime(data.date, data.time);
   data.assignedUserId = state.currentUser.uid;
@@ -755,6 +984,7 @@ async function handleDeliverySubmit(event) {
   } else {
     await createDoc(refs.deliveries, data);
   }
+
   event.currentTarget.reset();
 }
 
@@ -787,7 +1017,20 @@ function renderUsers() {
           <table>
             <thead><tr><th>Nome</th><th>Usuário</th><th>Função</th><th>Status</th><th>Permissões</th><th>Ações</th></tr></thead>
             <tbody>
-              ${state.users.map((user) => `<tr><td>${escapeHtml(user.fullName)}</td><td>${escapeHtml(user.username)}</td><td>${escapeHtml(user.role)}</td><td><span class="tag ${user.active ? 'success' : 'warning'}">${user.active ? 'Ativo' : 'Inativo'}</span></td><td>${(user.permissions || []).map(labelTab).join(', ')}</td><td><div class="inline-row"><button class="btn btn-secondary" data-user-edit="${user.id}">Editar</button><button class="btn btn-danger" data-user-delete="${user.id}">Excluir lógico</button></div></td></tr>`).join('') || '<tr><td colspan="6">Nenhum usuário cadastrado.</td></tr>'}
+              ${state.users.map((user) => `
+                <tr>
+                  <td>${escapeHtml(user.fullName)}</td>
+                  <td>${escapeHtml(user.username)}</td>
+                  <td>${escapeHtml(user.role)}</td>
+                  <td><span class="tag ${user.active ? 'success' : 'warning'}">${user.active ? 'Ativo' : 'Inativo'}</span></td>
+                  <td>${(user.permissions || []).map(labelTab).join(', ')}</td>
+                  <td>
+                    <div class="inline-row">
+                      <button class="btn btn-secondary" data-user-edit="${user.id}">Editar</button>
+                      <button class="btn btn-danger" data-user-delete="${user.id}">Excluir lógico</button>
+                    </div>
+                  </td>
+                </tr>`).join('') || '<tr><td colspan="6">Nenhum usuário cadastrado.</td></tr>'}
             </tbody>
           </table>
         </div>
@@ -797,10 +1040,14 @@ function renderUsers() {
 
   const form = tabEls.users.querySelector('#user-form');
   const roleField = form.elements.role;
-  roleField.addEventListener('change', () => markPermissionCheckboxes(form, ensurePermissionsByRole(roleField.value)));
+
+  roleField.addEventListener('change', () => {
+    markPermissionCheckboxes(form, ensurePermissionsByRole(roleField.value));
+  });
 
   if (state.editingUserId) {
     const editing = state.users.find((item) => item.id === state.editingUserId);
+
     if (editing) {
       form.elements.fullName.value = editing.fullName || '';
       form.elements.username.value = editing.username || '';
@@ -813,17 +1060,32 @@ function renderUsers() {
   }
 
   form.addEventListener('submit', handleUserSubmit);
-  tabEls.users.querySelector('#user-reset-btn').addEventListener('click', () => { state.editingUserId = null; renderUsers(); });
-  tabEls.users.querySelectorAll('[data-user-edit]').forEach((btn) => btn.addEventListener('click', () => { state.editingUserId = btn.dataset.userEdit; renderUsers(); }));
-  tabEls.users.querySelectorAll('[data-user-delete]').forEach((btn) => btn.addEventListener('click', async () => {
-    await deleteManagedUser(state.currentUser, btn.dataset.userDelete);
-    state.users = await listUsers();
+
+  tabEls.users.querySelector('#user-reset-btn').addEventListener('click', () => {
+    state.editingUserId = null;
     renderUsers();
-  }));
+  });
+
+  tabEls.users.querySelectorAll('[data-user-edit]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.editingUserId = btn.dataset.userEdit;
+      renderUsers();
+    });
+  });
+
+  tabEls.users.querySelectorAll('[data-user-delete]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      await deleteManagedUser(state.currentUser, btn.dataset.userDelete);
+      state.users = await listUsers();
+      renderUsers();
+    });
+  });
 }
 
 function markPermissionCheckboxes(form, permissions) {
-  [...form.querySelectorAll('input[name="permissions"]')].forEach((input) => { input.checked = permissions.includes(input.value); });
+  [...form.querySelectorAll('input[name="permissions"]')].forEach((input) => {
+    input.checked = permissions.includes(input.value);
+  });
 }
 
 async function handleUserSubmit(event) {
@@ -831,10 +1093,18 @@ async function handleUserSubmit(event) {
   const form = event.currentTarget;
   const raw = Object.fromEntries(new FormData(form).entries());
   const permissions = [...form.querySelectorAll('input[name="permissions"]:checked')].map((input) => input.value);
-  const payload = { ...raw, permissions, active: raw.active === 'true' };
 
-  if (state.editingUserId) await updateManagedUser(state.currentUser, state.editingUserId, payload);
-  else await createManagedUser(state.currentUser, payload);
+  const payload = {
+    ...raw,
+    permissions,
+    active: raw.active === 'true'
+  };
+
+  if (state.editingUserId) {
+    await updateManagedUser(state.currentUser, state.editingUserId, payload);
+  } else {
+    await createManagedUser(state.currentUser, payload);
+  }
 
   state.editingUserId = null;
   state.users = await listUsers();
@@ -863,7 +1133,8 @@ function renderSettings() {
       <div class="panel">
         <div class="section-header"><h2>Segurança</h2></div>
         <form id="password-form" class="settings-grid">
-          <label>Nova senha<input name="password" type="password" required /></label>
+          <label>Senha atual<input name="currentPassword" type="password" required /></label>
+          <label>Nova senha<input name="newPassword" type="password" required /></label>
           <div class="form-actions"><button class="btn btn-secondary" type="submit">Trocar senha</button></div>
         </form>
         <div class="auth-hint" style="margin-top:16px;">Usuários inativos não conseguem entrar, mesmo com senha correta. As permissões são conferidas tanto na interface quanto nas regras do Firestore.</div>
@@ -875,15 +1146,23 @@ function renderSettings() {
     event.preventDefault();
     const payload = Object.fromEntries(new FormData(event.currentTarget).entries());
     payload.lowStockThreshold = Number(payload.lowStockThreshold || 5);
+
     const existing = (await listCollection('settings')).find((item) => item.scope === 'system');
-    if (existing) await updateByPath('settings', existing.id, { ...payload, scope: 'system' });
-    else await createDoc(refs.settings, { ...payload, scope: 'system' });
+
+    if (existing) {
+      await updateByPath('settings', existing.id, { ...payload, scope: 'system' });
+    } else {
+      await createDoc(refs.settings, { ...payload, scope: 'system' });
+    }
   });
 
   tabEls.settings.querySelector('#password-form').addEventListener('submit', async (event) => {
     event.preventDefault();
-    const value = new FormData(event.currentTarget).get('password');
-    await changeCurrentPassword(String(value));
+    const formData = new FormData(event.currentTarget);
+    const currentPassword = String(formData.get('currentPassword') || '');
+    const newPassword = String(formData.get('newPassword') || '');
+
+    await changeCurrentPassword(currentPassword, newPassword);
     event.currentTarget.reset();
     alert('Senha atualizada com sucesso.');
   });
@@ -896,7 +1175,15 @@ function renderStockAlerts() {
 }
 
 function labelTab(tab) {
-  return { dashboard: 'Dashboard', sales: 'Vendas', products: 'Produtos', reports: 'Relatórios', deliveries: 'Tele-entregas', users: 'Usuários', settings: 'Configurações' }[tab] || tab;
+  return {
+    dashboard: 'Dashboard',
+    sales: 'Vendas',
+    products: 'Produtos',
+    reports: 'Relatórios',
+    deliveries: 'Tele-entregas',
+    users: 'Usuários',
+    settings: 'Configurações'
+  }[tab] || tab;
 }
 
 function renderBlocked() {
@@ -906,6 +1193,7 @@ function renderBlocked() {
 els.loginForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   showFeedback('Entrando...');
+
   try {
     await login(els.loginIdentifier.value, els.loginPassword.value);
     showFeedback('Login realizado.', 'success');
@@ -915,28 +1203,51 @@ els.loginForm.addEventListener('submit', async (event) => {
   }
 });
 
-els.logoutBtn.addEventListener('click', async () => { await logout(); stopCameraScan(); });
+els.logoutBtn.addEventListener('click', async () => {
+  await logout();
+  stopCameraScan();
+});
+
 els.nav.addEventListener('click', (event) => {
   const button = event.target.closest('[data-tab]');
+
   if (!button) return;
+
   activateTab(button.dataset.tab);
 });
-els.stockAlertBtn.addEventListener('click', () => els.stockAlertPanel.classList.toggle('hidden'));
-els.mobileMenuBtn.addEventListener('click', () => document.querySelector('.sidebar')?.classList.toggle('open'));
+
+els.stockAlertBtn.addEventListener('click', () => {
+  els.stockAlertPanel.classList.toggle('hidden');
+});
+
+els.mobileMenuBtn.addEventListener('click', () => {
+  document.querySelector('.sidebar')?.classList.toggle('open');
+});
+
 document.addEventListener('click', (event) => {
-  if (!event.target.closest('.alert-wrapper')) els.stockAlertPanel.classList.add('hidden');
+  if (!event.target.closest('.alert-wrapper')) {
+    els.stockAlertPanel.classList.add('hidden');
+  }
 });
 
 watchAuth(async (user) => {
   state.currentUser = user;
+
   if (!user) {
     setMainView(false);
     return;
   }
+
   setMainView(true);
   els.userName.textContent = user.fullName || user.username || user.email;
   els.userRole.textContent = `${formatRole(user.role)} · ${user.active ? 'Ativo' : 'Inativo'}`;
-  activateTab(hasPermission(user, 'dashboard') ? 'dashboard' : (AREAS.find((area) => hasPermission(user, area)) || 'deliveries'));
+
+  activateTab(
+    hasPermission(user, 'dashboard')
+      ? 'dashboard'
+      : (AREAS.find((area) => hasPermission(user, area)) || 'deliveries')
+  );
+
   await bootstrapData();
   renderApp();
   bindCartButtons();
