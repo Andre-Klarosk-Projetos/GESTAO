@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gestão Comercial</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./assets/css/styles.css" />
+</head>
+<body>
+  <div id="app" class="app-shell">
+    <section id="auth-view" class="auth-view">
+      <div class="auth-card glass">
+        <div>
+          <p class="eyebrow">Sistema web completo</p>
+          <h1>Gestão Comercial</h1>
+          <p class="muted">Login com Firebase Authentication, permissões por usuário, Firestore e interface responsiva para computador e celular.</p>
+        </div>
+        <form id="login-form" class="auth-form">
+          <label>
+            Usuário ou e-mail
+            <input type="text" id="login-identifier" placeholder="admin ou email@dominio.com" required />
+          </label>
+          <label>
+            Senha
+            <input type="password" id="login-password" placeholder="Digite sua senha" required />
+          </label>
+          <button type="submit" class="btn btn-primary btn-block">Entrar</button>
+        </form>
+        <div class="auth-hint">
+          <strong>Primeiro acesso:</strong>
+          <span>crie manualmente o usuário master no Firebase Authentication e o documento correspondente na collection <code>users</code>.</span>
+        </div>
+        <div id="auth-feedback" class="feedback"></div>
+      </div>
+    </section>
+
+    <section id="main-view" class="main-view hidden">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">GC</div>
+          <div>
+            <h2>Gestão Comercial</h2>
+            <p id="current-user-role">-</p>
+          </div>
+        </div>
+
+        <nav id="main-nav" class="nav-list">
+          <button data-tab="dashboard" class="nav-item active">Dashboard</button>
+          <button data-tab="sales" class="nav-item">Vendas</button>
+          <button data-tab="products" class="nav-item">Produtos</button>
+          <button data-tab="reports" class="nav-item">Relatórios</button>
+          <button data-tab="deliveries" class="nav-item">Tele-entregas</button>
+          <button data-tab="users" class="nav-item">Usuários</button>
+          <button data-tab="settings" class="nav-item">Configurações</button>
+        </nav>
+
+        <div class="sidebar-footer">
+          <div id="current-user-name" class="user-chip"></div>
+          <button id="logout-btn" class="btn btn-secondary btn-block">Sair</button>
+        </div>
+      </aside>
+
+      <div class="content-area">
+        <header class="topbar glass">
+          <button id="mobile-menu-btn" class="icon-btn mobile-only" title="Abrir menu">☰</button>
+          <div>
+            <h1 id="page-title">Dashboard</h1>
+            <p class="muted">Operação comercial centralizada</p>
+          </div>
+          <div class="topbar-actions">
+            <div class="alert-wrapper">
+              <button id="stock-alert-btn" class="icon-btn" title="Alertas de estoque">🔔 <span id="stock-alert-count" class="badge">0</span></button>
+              <div id="stock-alert-panel" class="dropdown-panel hidden">
+                <h3>Estoque baixo</h3>
+                <div id="stock-alert-list" class="stack-list"></div>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <main class="page-container">
+          <section id="tab-dashboard" class="tab-panel active"></section>
+          <section id="tab-sales" class="tab-panel"></section>
+          <section id="tab-products" class="tab-panel"></section>
+          <section id="tab-reports" class="tab-panel"></section>
+          <section id="tab-deliveries" class="tab-panel"></section>
+          <section id="tab-users" class="tab-panel"></section>
+          <section id="tab-settings" class="tab-panel"></section>
+        </main>
+      </div>
+    </section>
+  </div>
+
+  <div id="modal-root"></div>
+
+  <script type="module" src="./assets/js/app.js"></script>
+</body>
+</html>

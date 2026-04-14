@@ -1,0 +1,57 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function me() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isActive() {
+      return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && me().active == true;
+    }
+
+    function isAdmin() {
+      return isActive() && me().role == 'Administrador';
+    }
+
+    function hasArea(area) {
+      return isAdmin() || (isActive() && area in me().permissions);
+    }
+
+    match /users/{userId} {
+      allow read: if isAdmin() || (isActive() && request.auth.uid == userId);
+      allow create: if isAdmin();
+      allow update: if isAdmin() || (isActive() && request.auth.uid == userId && !("role" in request.resource.data.diff(resource.data).affectedKeys()) && !("permissions" in request.resource.data.diff(resource.data).affectedKeys()) && !("active" in request.resource.data.diff(resource.data).affectedKeys()));
+      allow delete: if false;
+    }
+
+    match /products/{productId} {
+      allow read: if hasArea('products') || hasArea('sales') || hasArea('reports');
+      allow create, update: if hasArea('products');
+      allow delete: if false;
+    }
+
+    match /sales/{saleId} {
+      allow read: if hasArea('sales') || hasArea('reports') || hasArea('dashboard');
+      allow create: if hasArea('sales');
+      allow update: if isAdmin() || hasArea('sales');
+      allow delete: if false;
+    }
+
+    match /deliveries/{deliveryId} {
+      allow read: if hasArea('deliveries') || hasArea('dashboard');
+      allow create: if hasArea('deliveries') || hasArea('sales');
+      allow update: if hasArea('deliveries') || hasArea('sales');
+      allow delete: if false;
+    }
+
+    match /settings/{settingId} {
+      allow read: if isActive();
+      allow create, update: if hasArea('settings') || isAdmin();
+      allow delete: if false;
+    }
+  }
+}
