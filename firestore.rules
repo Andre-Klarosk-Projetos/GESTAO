@@ -1,57 +1,109 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+
     function signedIn() {
       return request.auth != null;
     }
 
-    function me() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function userExists() {
+      return signedIn() && userDoc().data != null;
+    }
+
+    function currentUser() {
+      return userDoc().data;
     }
 
     function isActive() {
-      return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && me().active == true;
+      return userExists() && (
+        (currentUser().ativo == true || currentUser().active == true) &&
+        currentUser().deleted != true
+      );
+    }
+
+    function roleValue() {
+      return currentUser().tipo != null ? currentUser().tipo : currentUser().role;
     }
 
     function isAdmin() {
-      return isActive() && me().role == 'Administrador';
+      return isActive() && (
+        roleValue() == "Gerente" ||
+        roleValue() == "Administrador"
+      );
     }
 
-    function hasArea(area) {
-      return isAdmin() || (isActive() && area in me().permissions);
+    function canUsers() {
+      return isAdmin() ||
+        currentUser().permissoes.usuarios == true ||
+        currentUser().permissions.hasAny(["users"]);
+    }
+
+    function canProducts() {
+      return isAdmin() ||
+        currentUser().permissoes.produtos == true ||
+        currentUser().permissoes.estoque == true ||
+        currentUser().permissions.hasAny(["products"]);
+    }
+
+    function canSales() {
+      return isAdmin() ||
+        currentUser().permissoes.vendas == true ||
+        currentUser().permissions.hasAny(["sales"]);
+    }
+
+    function canReports() {
+      return isAdmin() ||
+        currentUser().permissoes.relatorios == true ||
+        currentUser().permissions.hasAny(["reports"]);
+    }
+
+    function canDeliveries() {
+      return isAdmin() ||
+        currentUser().permissoes.tele_entregas == true ||
+        currentUser().permissions.hasAny(["deliveries"]);
+    }
+
+    function canSettings() {
+      return isAdmin() ||
+        currentUser().permissoes.configuracoes == true ||
+        currentUser().permissions.hasAny(["settings"]);
     }
 
     match /users/{userId} {
-      allow read: if isAdmin() || (isActive() && request.auth.uid == userId);
-      allow create: if isAdmin();
-      allow update: if isAdmin() || (isActive() && request.auth.uid == userId && !("role" in request.resource.data.diff(resource.data).affectedKeys()) && !("permissions" in request.resource.data.diff(resource.data).affectedKeys()) && !("active" in request.resource.data.diff(resource.data).affectedKeys()));
-      allow delete: if false;
+      allow read: if isActive() && (request.auth.uid == userId || canUsers());
+      allow create: if signedIn();
+      allow update: if isActive() && (request.auth.uid == userId || canUsers());
+      allow delete: if isAdmin();
     }
 
     match /products/{productId} {
-      allow read: if hasArea('products') || hasArea('sales') || hasArea('reports');
-      allow create, update: if hasArea('products');
+      allow read: if isActive() && (canProducts() || canSales() || canReports());
+      allow create, update: if isActive() && canProducts();
       allow delete: if false;
     }
 
     match /sales/{saleId} {
-      allow read: if hasArea('sales') || hasArea('reports') || hasArea('dashboard');
-      allow create: if hasArea('sales');
-      allow update: if isAdmin() || hasArea('sales');
+      allow read: if isActive() && (canSales() || canReports());
+      allow create, update: if isActive() && canSales();
       allow delete: if false;
     }
 
     match /deliveries/{deliveryId} {
-      allow read: if hasArea('deliveries') || hasArea('dashboard');
-      allow create: if hasArea('deliveries') || hasArea('sales');
-      allow update: if hasArea('deliveries') || hasArea('sales');
+      allow read: if isActive() && canDeliveries();
+      allow create, update: if isActive() && canDeliveries();
       allow delete: if false;
     }
 
-    match /settings/{settingId} {
-      allow read: if isActive();
-      allow create, update: if hasArea('settings') || isAdmin();
-      allow delete: if false;
+    match /settings/{docId} {
+      allow read, write: if isActive() && canSettings();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }
