@@ -80,7 +80,10 @@ const state = {
   editingUserId: null,
   editingDeliveryId: null,
   cart: [],
-  unsubscribe: []
+  unsubscribe: [],
+  barcodeBuffer: '',
+  barcodeTimer: null,
+  deliveryDateFilter: ''
 };
 
 function showFeedback(message, type = '') {
@@ -96,6 +99,11 @@ function escapeHtml(value = '') {
     '\'': '&#39;',
     '"': '&quot;'
   }[char]));
+}
+
+function isMobileDevice() {
+  return /Android|iPhone|iPad|iPod|Mobile|Windows Phone|Opera Mini/i.test(navigator.userAgent)
+    || window.matchMedia('(max-width: 768px)').matches;
 }
 
 function renderApp() {
@@ -423,23 +431,29 @@ function renderSales() {
   }
 
   const cartTotal = calculateCartTotal();
+  const mobile = isMobileDevice();
 
   tabEls.sales.innerHTML = `
     <div class="sales-layout">
       <div class="panel">
-        <div class="section-header"><h2>Novo atendimento</h2><span class="muted">Busca por nome, código de barras e leitor por câmera</span></div>
+        <div class="section-header"><h2>Novo atendimento</h2><span class="muted">Busca por nome, código de barras, leitor USB e câmera</span></div>
         <div class="search-row">
-          <input id="sale-product-search" placeholder="Pesquisar produto por nome ou código de barras" />
+          <input id="sale-product-search" placeholder="Pesquisar ou bipar código de barras" autocomplete="off" />
           <button id="sale-product-search-btn" class="btn btn-secondary">Buscar</button>
-          <button id="camera-scan-btn" class="btn btn-primary">Ler pela câmera</button>
+          <button id="camera-scan-btn" class="btn btn-primary">${mobile ? 'Ler código de barras' : 'Ler código de barras'}</button>
+        </div>
+        <div class="auth-hint" style="margin-top:10px;">
+          ${mobile
+            ? 'No celular, o botão abre a câmera para leitura.'
+            : 'No computador, você pode bipar direto no campo de busca com leitor USB. O botão também tenta usar câmera quando disponível.'}
         </div>
         <div id="sale-search-results" class="stack-list" style="margin-top:14px;"></div>
         <div class="scanner-card" style="margin-top:14px;">
-          <h3>Leitor por câmera</h3>
+          <h3>Leitura de código de barras</h3>
           <video id="barcode-video" class="video-preview" autoplay muted playsinline></video>
           <div class="inline-row" style="margin-top:10px;">
-            <span class="muted">Usa <span class="kbd">BarcodeDetector</span> quando disponível.</span>
-            <button id="stop-scan-btn" class="btn btn-secondary">Parar câmera</button>
+            <span class="muted">O sistema usa câmera no celular e aceita leitura automática por leitor USB no desktop.</span>
+            <button id="stop-scan-btn" class="btn btn-secondary">Parar leitura</button>
           </div>
         </div>
       </div>
@@ -484,21 +498,19 @@ function renderSales() {
     </div>
   `;
 
-  tabEls.sales.querySelector('#sale-product-search-btn').addEventListener('click', handleSaleSearch);
-  tabEls.sales.querySelector('#sale-product-search').addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      handleSaleSearch();
-    }
-  });
+  const searchInput = tabEls.sales.querySelector('#sale-product-search');
 
+  tabEls.sales.querySelector('#sale-product-search-btn').addEventListener('click', handleSaleSearch);
+  searchInput.addEventListener('keydown', handleSalesSearchInputKeydown);
+  searchInput.addEventListener('input', handleSalesSearchInputAutoScan);
   tabEls.sales.querySelector('#sale-form').addEventListener('submit', handleSaleSubmit);
+
   tabEls.sales.querySelector('#clear-cart-btn').addEventListener('click', () => {
     state.cart = [];
     renderSales();
   });
 
-  tabEls.sales.querySelector('#camera-scan-btn').addEventListener('click', startCameraScan);
+  tabEls.sales.querySelector('#camera-scan-btn').addEventListener('click', handleBarcodeReadAction);
   tabEls.sales.querySelector('#stop-scan-btn').addEventListener('click', stopCameraScan);
   bindCartButtons();
 
@@ -547,6 +559,71 @@ function handleSaleSearch() {
   resultsEl.querySelectorAll('[data-add-cart]').forEach((btn) => {
     btn.addEventListener('click', () => addProductToCart(btn.dataset.addCart));
   });
+}
+
+function findProductByBarcode(barcode) {
+  const code = String(barcode || '').trim();
+  if (!code) return null;
+  return state.products.find((item) => String(item.barcode || '').trim() === code) || null;
+}
+
+function tryAddProductByBarcode(barcode) {
+  const product = findProductByBarcode(barcode);
+
+  if (!product) {
+    handleSaleSearch();
+    return false;
+  }
+
+  addProductToCart(product.id);
+  const searchInput = tabEls.sales.querySelector('#sale-product-search');
+  if (searchInput) {
+    searchInput.value = product.barcode || '';
+  }
+  return true;
+}
+
+function handleSalesSearchInputKeydown(event) {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    const value = event.currentTarget.value.trim();
+    if (!tryAddProductByBarcode(value)) {
+      handleSaleSearch();
+    }
+  }
+}
+
+function handleSalesSearchInputAutoScan(event) {
+  const input = event.currentTarget;
+  const value = input.value.trim();
+
+  window.clearTimeout(state.barcodeTimer);
+
+  state.barcodeTimer = window.setTimeout(() => {
+    if (value.length >= 6) {
+      tryAddProductByBarcode(value);
+    }
+  }, 120);
+}
+
+async function handleBarcodeReadAction() {
+  const mobile = isMobileDevice();
+
+  if (mobile) {
+    await startCameraScan();
+    return;
+  }
+
+  if ('BarcodeDetector' in window && navigator.mediaDevices?.getUserMedia) {
+    await startCameraScan();
+    return;
+  }
+
+  const searchInput = tabEls.sales.querySelector('#sale-product-search');
+  if (searchInput) {
+    searchInput.focus();
+    alert('Leitor USB detectado por digitação no campo de busca. Bipe o código de barras agora.');
+  }
 }
 
 function addProductToCart(productId) {
@@ -716,7 +793,12 @@ async function startCameraScan() {
   const video = document.getElementById('barcode-video');
 
   if (!('BarcodeDetector' in window)) {
-    alert('BarcodeDetector não disponível neste navegador. Use pesquisa manual ou um navegador compatível no celular.');
+    alert('Leitura por câmera não disponível neste navegador. Use o campo de busca com leitor USB ou pesquisa manual.');
+    return;
+  }
+
+  if (!navigator.mediaDevices?.getUserMedia) {
+    alert('A câmera não está disponível neste dispositivo.');
     return;
   }
 
@@ -876,11 +958,36 @@ function getLowStockProducts() {
   return state.products.filter((item) => item.status !== 'inativo' && Number(item.quantity || 0) <= threshold);
 }
 
+function getFilteredDeliveries() {
+  if (!state.deliveryDateFilter) {
+    return state.deliveries;
+  }
+
+  const filterDate = state.deliveryDateFilter;
+
+  return state.deliveries.filter((item) => {
+    if (item.date) {
+      return item.date === filterDate;
+    }
+
+    const rawDate = item.scheduledAt?.toDate ? item.scheduledAt.toDate() : (item.scheduledAt ? new Date(item.scheduledAt) : null);
+    if (!rawDate || Number.isNaN(rawDate.getTime())) return false;
+
+    const yyyy = rawDate.getFullYear();
+    const mm = String(rawDate.getMonth() + 1).padStart(2, '0');
+    const dd = String(rawDate.getDate()).padStart(2, '0');
+
+    return `${yyyy}-${mm}-${dd}` === filterDate;
+  });
+}
+
 function renderDeliveries() {
   if (!hasPermission(state.currentUser, 'deliveries')) {
     tabEls.deliveries.innerHTML = renderBlocked();
     return;
   }
+
+  const filteredDeliveries = getFilteredDeliveries();
 
   tabEls.deliveries.innerHTML = `
     <div class="deliveries-layout">
@@ -901,19 +1008,24 @@ function renderDeliveries() {
         </form>
       </div>
       <div class="table-card">
-        <div class="section-header"><h2>Agenda</h2></div>
+        <div class="section-header"><h2>Agenda</h2><span class="muted">${filteredDeliveries.length} resultado(s)</span></div>
+        <div class="search-row" style="margin-bottom:14px;">
+          <input id="delivery-date-filter" type="date" value="${state.deliveryDateFilter || ''}" />
+          <button class="btn btn-secondary" id="delivery-date-filter-btn">Filtrar por data</button>
+          <button class="btn btn-secondary" id="delivery-date-clear-btn">Limpar filtro</button>
+        </div>
         <div class="table-wrap">
           <table>
             <thead><tr><th>Cliente</th><th>Data</th><th>Telefone</th><th>Status</th><th>Valor</th><th>Ações</th></tr></thead>
             <tbody>
-              ${state.deliveries.map((item) => `<tr>
+              ${filteredDeliveries.map((item) => `<tr>
                 <td>${escapeHtml(item.clientName)}</td>
                 <td>${formatDate(item.scheduledAt)} ${item.time || ''}</td>
                 <td>${escapeHtml(item.phone)}</td>
                 <td><span class="tag ${deliveryStatusClass(item.status)}">${item.status}</span></td>
                 <td>${currency(item.amount)}</td>
                 <td><div class="inline-row"><button class="btn btn-secondary" data-delivery-edit="${item.id}">Editar</button><button class="btn btn-success" data-delivery-status="${item.id}:Concluído">Concluir</button><button class="btn btn-danger" data-delivery-status="${item.id}:Cancelado">Cancelar</button><button class="btn btn-secondary" data-delivery-status="${item.id}:Em rota">Iniciar</button><button class="btn btn-secondary" data-delivery-status="${item.id}:Reagendado">Reagendar</button></div></td>
-              </tr>`).join('') || '<tr><td colspan="6">Nenhum atendimento cadastrado.</td></tr>'}
+              </tr>`).join('') || '<tr><td colspan="6">Nenhum atendimento encontrado.</td></tr>'}
             </tbody>
           </table>
         </div>
@@ -944,6 +1056,22 @@ function renderDeliveries() {
 
   tabEls.deliveries.querySelector('#delivery-reset-btn').addEventListener('click', () => {
     state.editingDeliveryId = null;
+    renderDeliveries();
+  });
+
+  tabEls.deliveries.querySelector('#delivery-date-filter-btn').addEventListener('click', () => {
+    const dateValue = tabEls.deliveries.querySelector('#delivery-date-filter').value;
+    state.deliveryDateFilter = dateValue || '';
+    renderDeliveries();
+  });
+
+  tabEls.deliveries.querySelector('#delivery-date-clear-btn').addEventListener('click', () => {
+    state.deliveryDateFilter = '';
+    renderDeliveries();
+  });
+
+  tabEls.deliveries.querySelector('#delivery-date-filter').addEventListener('change', (event) => {
+    state.deliveryDateFilter = event.currentTarget.value || '';
     renderDeliveries();
   });
 
