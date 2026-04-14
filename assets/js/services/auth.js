@@ -62,7 +62,7 @@ function sanitizeString(value) {
 function normalizeRole(role) {
   const value = sanitizeString(role);
 
-  if (value === "Administrador") return "Gerente";
+  if (value === "Administrador") return "Administrador";
   if (value === "Gerente") return "Gerente";
   if (value === "Vendedor") return "Vendedor";
   if (value === "Estoque") return "Estoque";
@@ -78,6 +78,11 @@ export function normalizeLoginEmail(value) {
   if (input.includes("@")) return input;
 
   return `${input}@gestao.local`;
+}
+
+function roleIsAdmin(role) {
+  const normalized = normalizeRole(role);
+  return normalized === "Administrador" || normalized === "Gerente";
 }
 
 function permissionsArrayToMap(permissions = [], role = "Vendedor") {
@@ -101,27 +106,19 @@ function permissionsArrayToMap(permissions = [], role = "Vendedor") {
     });
   }
 
-  const normalizedRole = normalizeRole(role);
-
-  if (normalizedRole === "Gerente") {
+  if (roleIsAdmin(role)) {
     Object.keys(map).forEach((key) => {
       map[key] = true;
     });
-  }
-
-  if (normalizedRole === "Vendedor") {
+  } else if (normalizeRole(role) === "Vendedor") {
     map.vendas = true;
     map.produtos = true;
     map.tele_entregas = true;
     map.estoque = true;
-  }
-
-  if (normalizedRole === "Estoque") {
+  } else if (normalizeRole(role) === "Estoque") {
     map.produtos = true;
     map.estoque = true;
-  }
-
-  if (normalizedRole === "Entregador") {
+  } else if (normalizeRole(role) === "Entregador") {
     map.tele_entregas = true;
   }
 
@@ -141,19 +138,41 @@ function permissionsMapToArray(permissoes = {}) {
 }
 
 function firestoreUserToAppUser(uid, data = {}) {
-  const permissions = permissionsMapToArray(data.permissoes || {});
+  const isLegacy = data.fullName !== undefined || data.role !== undefined || data.active !== undefined;
+
+  const fullName = isLegacy ? (data.fullName || "") : (data.nome || "");
+  const username = isLegacy ? (data.username || "") : (data.usuario || "");
+  const email = data.email || "";
+
+  const role = isLegacy
+    ? normalizeRole(data.role || "Vendedor")
+    : normalizeRole(data.tipo || "Vendedor");
+
+  const active = isLegacy
+    ? data.active === true
+    : data.ativo === true;
+
+  const deleted = data.deleted === true;
+
+  const permissions = isLegacy
+    ? (Array.isArray(data.permissions) ? data.permissions : [])
+    : permissionsMapToArray(data.permissoes || {});
+
+  const permissionsMap = isLegacy
+    ? permissionsArrayToMap(permissions, role)
+    : { ...(data.permissoes || {}) };
 
   return {
     id: uid,
     uid,
-    fullName: data.nome || "",
-    username: data.usuario || "",
-    email: data.email || "",
-    role: normalizeRole(data.tipo),
-    active: data.ativo === true,
-    deleted: data.deleted === true,
+    fullName,
+    username,
+    email,
+    role,
+    active,
+    deleted,
     permissions,
-    permissionsMap: { ...(data.permissoes || {}) },
+    permissionsMap,
     rawProfile: data
   };
 }
@@ -172,6 +191,11 @@ function appPayloadToFirestorePayload(data = {}, mode = "create") {
     tipo: role,
     ativo: data.active === undefined ? (data.ativo !== false) : data.active === true,
     permissoes: permissionsMap,
+    fullName: sanitizeString(data.fullName || data.nome),
+    username: sanitizeString(data.username || data.usuario).toLowerCase(),
+    role: role,
+    active: data.active === undefined ? (data.ativo !== false) : data.active === true,
+    permissions: Array.isArray(data.permissions) ? data.permissions : permissionsMapToArray(permissionsMap),
     updatedAt: serverTimestamp()
   };
 
@@ -203,10 +227,10 @@ function buildFriendlyAuthError(error) {
       return new Error("A senha precisa ter pelo menos 6 caracteres.");
 
     case "auth/too-many-requests":
-      return new Error("Muitas tentativas. Tente novamente em instantes.");
+      return new Error("Tente novamente em instantes.");
 
     case "auth/requires-recent-login":
-      return new Error("Por segurança, informe a senha atual para definir a nova senha.");
+      return new Error("Por segurança, faça login novamente antes de alterar a senha.");
 
     case "permission-denied":
       return new Error("Sem permissão para acessar os dados no Firestore.");
@@ -218,7 +242,11 @@ function buildFriendlyAuthError(error) {
   }
 }
 
-async function getUserSnapshotByUid(uid) {
+async function getUserDocByUid(uid) {
+  if (!uid) {
+    throw new Error("UID do usuário não informado.");
+  }
+
   const ref = doc(db, "users", uid);
   const snap = await getDoc(ref);
   return { ref, snap };
@@ -280,26 +308,26 @@ export async function login(identifier, password) {
 
     const credential = await signInWithEmailAndPassword(auth, loginEmail, password);
     const authUser = credential.user;
-    const { snap } = await getUserSnapshotByUid(authUser.uid);
+    const { snap } = await getUserDocByUid(authUser.uid);
 
     if (!snap.exists()) {
       await signOut(auth);
-      throw new Error("Perfil do usuário não encontrado no Firestore. Crie o documento na coleção users com o UID do Authentication.");
+      throw new Error("Perfil do usuário não encontrado no Firestore. Crie o documento na coleção users usando o UID do Authentication.");
     }
 
-    const data = snap.data();
+    const user = firestoreUserToAppUser(authUser.uid, snap.data());
 
-    if (data.deleted === true) {
+    if (user.deleted === true) {
       await signOut(auth);
       throw new Error("Usuário excluído logicamente. Acesso bloqueado.");
     }
 
-    if (data.ativo !== true) {
+    if (user.active !== true) {
       await signOut(auth);
       throw new Error("Usuário inativo. Acesso bloqueado.");
     }
 
-    return firestoreUserToAppUser(authUser.uid, data);
+    return user;
   } catch (error) {
     console.error("Erro no login:", error);
     throw buildFriendlyAuthError(error);
@@ -310,9 +338,7 @@ export async function logout() {
   await signOut(auth);
 }
 
-export async function logoutUser() {
-  await signOut(auth);
-}
+export const logoutUser = logout;
 
 export function getCurrentAuthUser() {
   return auth.currentUser || null;
@@ -325,7 +351,7 @@ export async function getCurrentUserProfile() {
     return null;
   }
 
-  const { snap } = await getUserSnapshotByUid(currentUser.uid);
+  const { snap } = await getUserDocByUid(currentUser.uid);
 
   if (!snap.exists()) {
     return null;
@@ -342,7 +368,7 @@ export function watchAuth(callback) {
         return;
       }
 
-      const { snap } = await getUserSnapshotByUid(firebaseUser.uid);
+      const { snap } = await getUserDocByUid(firebaseUser.uid);
 
       if (!snap.exists()) {
         await signOut(auth);
@@ -350,17 +376,17 @@ export function watchAuth(callback) {
         return;
       }
 
-      const data = snap.data();
+      const user = firestoreUserToAppUser(firebaseUser.uid, snap.data());
 
-      if (data.deleted === true || data.ativo !== true) {
+      if (user.deleted === true || user.active !== true) {
         await signOut(auth);
         callback(null);
         return;
       }
 
-      callback(firestoreUserToAppUser(firebaseUser.uid, data));
+      callback(user);
     } catch (error) {
-      console.error("Erro ao observar autenticação:", error);
+      console.error("Erro ao carregar sessão:", error);
       callback(null);
     }
   });
@@ -447,9 +473,7 @@ export async function createManagedUser(arg1, arg2) {
   let secondaryAuth = null;
 
   try {
-    const secondary = await createSecondaryAppAndAuth();
-    secondaryApp = secondary.secondaryApp;
-    secondaryAuth = secondary.secondaryAuth;
+    ({ secondaryApp, secondaryAuth } = await createSecondaryAppAndAuth());
 
     const credential = await createUserWithEmailAndPassword(secondaryAuth, email, password);
     const createdUser = credential.user;
@@ -485,45 +509,40 @@ export async function updateManagedUser(arg1, arg2, arg3) {
     throw new Error("UID do usuário não informado.");
   }
 
-  const payload = appPayloadToFirestorePayload(data || {}, "update");
+  const updates = appPayloadToFirestorePayload(data || {}, "update");
 
-  if (!sanitizeString(data?.fullName || data?.nome)) {
-    delete payload.nome;
-  }
-
-  if (!sanitizeString(data?.username || data?.usuario)) {
-    delete payload.usuario;
-  }
-
-  if (!sanitizeString(data?.email)) {
-    delete payload.email;
-  }
-
-  if (!sanitizeString(data?.role || data?.tipo)) {
-    delete payload.tipo;
-  }
+  if (!sanitizeString(data?.fullName || data?.nome)) delete updates.nome;
+  if (!sanitizeString(data?.username || data?.usuario)) delete updates.usuario;
+  if (!sanitizeString(data?.email)) delete updates.email;
+  if (!sanitizeString(data?.role || data?.tipo)) delete updates.tipo;
+  if (!sanitizeString(data?.fullName || data?.nome)) delete updates.fullName;
+  if (!sanitizeString(data?.username || data?.usuario)) delete updates.username;
+  if (!sanitizeString(data?.role || data?.tipo)) delete updates.role;
 
   if (!Array.isArray(data?.permissions) && !isObject(data?.permissoes)) {
-    delete payload.permissoes;
+    delete updates.permissoes;
+    delete updates.permissions;
   }
 
   if (typeof data?.active !== "boolean" && typeof data?.ativo !== "boolean") {
-    delete payload.ativo;
+    delete updates.ativo;
+    delete updates.active;
   }
 
-  await updateDoc(doc(db, "users", uid), payload);
+  await updateDoc(doc(db, "users", uid), updates);
   return true;
 }
 
 export const updateUser = updateManagedUser;
 
-export async function setUserActiveStatus(uid, active) {
+export async function setUserActiveStatus(uid, ativo) {
   if (!uid) {
     throw new Error("UID do usuário não informado.");
   }
 
   await updateDoc(doc(db, "users", uid), {
-    ativo: active === true,
+    ativo: ativo === true,
+    active: ativo === true,
     updatedAt: serverTimestamp()
   });
 
@@ -541,6 +560,7 @@ export async function softDeleteManagedUser(arg1, arg2) {
 
   await updateDoc(doc(db, "users", uid), {
     ativo: false,
+    active: false,
     deleted: true,
     updatedAt: serverTimestamp()
   });
@@ -562,7 +582,7 @@ export async function hardDeleteUserDoc(uid) {
 
 export async function listUsers() {
   const usersRef = collection(db, "users");
-  const usersQuery = query(usersRef, firestoreOrderBy("nome"));
+  const usersQuery = query(usersRef, firestoreOrderBy("updatedAt", "desc"));
   const snap = await getDocs(usersQuery);
 
   return snap.docs
@@ -573,7 +593,7 @@ export async function listUsers() {
 export function hasPermission(profile, area) {
   if (!profile || !area) return false;
 
-  if (normalizeRole(profile.role || profile.tipo) === "Gerente") {
+  if (roleIsAdmin(profile.role || profile.tipo)) {
     return true;
   }
 
@@ -589,5 +609,5 @@ export function isUserActive(profile) {
 }
 
 export function isAdmin(profile) {
-  return normalizeRole(profile?.role || profile?.tipo) === "Gerente" && isUserActive(profile);
+  return roleIsAdmin(profile?.role || profile?.tipo) && isUserActive(profile);
 }
