@@ -106,6 +106,28 @@ function isMobileDevice() {
     || window.matchMedia('(max-width: 768px)').matches;
 }
 
+function showToast(message, type = 'info') {
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${type}`;
+  toast.textContent = message;
+  toast.style.position = 'fixed';
+  toast.style.right = '16px';
+  toast.style.bottom = '16px';
+  toast.style.zIndex = '9999';
+  toast.style.padding = '12px 16px';
+  toast.style.borderRadius = '12px';
+  toast.style.fontWeight = '600';
+  toast.style.boxShadow = '0 10px 30px rgba(0,0,0,0.18)';
+  toast.style.background = type === 'error' ? '#b42318' : type === 'success' ? '#027a48' : '#1d2939';
+  toast.style.color = '#fff';
+
+  document.body.appendChild(toast);
+
+  setTimeout(() => {
+    toast.remove();
+  }, 2600);
+}
+
 function renderApp() {
   renderDashboard();
   renderProducts();
@@ -436,26 +458,28 @@ function renderSales() {
   tabEls.sales.innerHTML = `
     <div class="sales-layout">
       <div class="panel">
-        <div class="section-header"><h2>Novo atendimento</h2><span class="muted">Busca por nome, código de barras, leitor USB e câmera</span></div>
+        <div class="section-header"><h2>Novo atendimento</h2><span class="muted">Busca por nome, código de barras e leitor USB</span></div>
         <div class="search-row">
           <input id="sale-product-search" placeholder="Pesquisar ou bipar código de barras" autocomplete="off" />
           <button id="sale-product-search-btn" class="btn btn-secondary">Buscar</button>
-          <button id="camera-scan-btn" class="btn btn-primary">${mobile ? 'Ler código de barras' : 'Ler código de barras'}</button>
+          ${mobile ? '<button id="camera-scan-btn" class="btn btn-primary">Ler código de barras</button>' : ''}
         </div>
         <div class="auth-hint" style="margin-top:10px;">
           ${mobile
-            ? 'No celular, o botão abre a câmera para leitura.'
-            : 'No computador, você pode bipar direto no campo de busca com leitor USB. O botão também tenta usar câmera quando disponível.'}
+            ? 'No celular, você pode usar a câmera para leitura.'
+            : 'No computador, basta focar o campo de busca e bipar com o leitor USB.'}
         </div>
         <div id="sale-search-results" class="stack-list" style="margin-top:14px;"></div>
-        <div class="scanner-card" style="margin-top:14px;">
-          <h3>Leitura de código de barras</h3>
-          <video id="barcode-video" class="video-preview" autoplay muted playsinline></video>
-          <div class="inline-row" style="margin-top:10px;">
-            <span class="muted">O sistema usa câmera no celular e aceita leitura automática por leitor USB no desktop.</span>
-            <button id="stop-scan-btn" class="btn btn-secondary">Parar leitura</button>
+        ${mobile ? `
+          <div class="scanner-card" id="scanner-card" style="margin-top:14px; display:none;">
+            <h3>Leitura de código de barras</h3>
+            <video id="barcode-video" class="video-preview" autoplay muted playsinline></video>
+            <div class="inline-row" style="margin-top:10px;">
+              <span class="muted">Use a câmera traseira para ler o código.</span>
+              <button id="stop-scan-btn" class="btn btn-secondary">Parar leitura</button>
+            </div>
           </div>
-        </div>
+        ` : ''}
       </div>
       <div class="panel">
         <div class="section-header"><h2>Itens da venda</h2><span class="muted">${state.cart.length} item(ns)</span></div>
@@ -510,8 +534,11 @@ function renderSales() {
     renderSales();
   });
 
-  tabEls.sales.querySelector('#camera-scan-btn').addEventListener('click', handleBarcodeReadAction);
-  tabEls.sales.querySelector('#stop-scan-btn').addEventListener('click', stopCameraScan);
+  if (mobile) {
+    tabEls.sales.querySelector('#camera-scan-btn').addEventListener('click', handleBarcodeReadAction);
+    tabEls.sales.querySelector('#stop-scan-btn').addEventListener('click', stopCameraScan);
+  }
+
   bindCartButtons();
 
   const discountField = tabEls.sales.querySelector('input[name="discount"]');
@@ -567,10 +594,13 @@ function findProductByBarcode(barcode) {
   return state.products.find((item) => String(item.barcode || '').trim() === code) || null;
 }
 
-function tryAddProductByBarcode(barcode) {
+function tryAddProductByBarcode(barcode, showWarning = true) {
   const product = findProductByBarcode(barcode);
 
   if (!product) {
+    if (showWarning) {
+      showToast('Produto não cadastrado.', 'error');
+    }
     handleSaleSearch();
     return false;
   }
@@ -580,6 +610,7 @@ function tryAddProductByBarcode(barcode) {
   if (searchInput) {
     searchInput.value = product.barcode || '';
   }
+  showToast('Produto adicionado à venda.', 'success');
   return true;
 }
 
@@ -587,7 +618,7 @@ function handleSalesSearchInputKeydown(event) {
   if (event.key === 'Enter') {
     event.preventDefault();
     const value = event.currentTarget.value.trim();
-    if (!tryAddProductByBarcode(value)) {
+    if (!tryAddProductByBarcode(value, true)) {
       handleSaleSearch();
     }
   }
@@ -601,29 +632,22 @@ function handleSalesSearchInputAutoScan(event) {
 
   state.barcodeTimer = window.setTimeout(() => {
     if (value.length >= 6) {
-      tryAddProductByBarcode(value);
+      tryAddProductByBarcode(value, true);
     }
   }, 120);
 }
 
 async function handleBarcodeReadAction() {
-  const mobile = isMobileDevice();
-
-  if (mobile) {
-    await startCameraScan();
+  if (!isMobileDevice()) {
+    const searchInput = tabEls.sales.querySelector('#sale-product-search');
+    if (searchInput) {
+      searchInput.focus();
+      showToast('Use o leitor USB no campo de busca.', 'info');
+    }
     return;
   }
 
-  if ('BarcodeDetector' in window && navigator.mediaDevices?.getUserMedia) {
-    await startCameraScan();
-    return;
-  }
-
-  const searchInput = tabEls.sales.querySelector('#sale-product-search');
-  if (searchInput) {
-    searchInput.focus();
-    alert('Leitor USB detectado por digitação no campo de busca. Bipe o código de barras agora.');
-  }
+  await startCameraScan();
 }
 
 function addProductToCart(productId) {
@@ -790,19 +814,30 @@ let streamRef = null;
 let scanTimer = null;
 
 async function startCameraScan() {
+  if (!isMobileDevice()) {
+    return;
+  }
+
+  const scannerCard = document.getElementById('scanner-card');
   const video = document.getElementById('barcode-video');
 
+  if (!scannerCard || !video) {
+    return;
+  }
+
   if (!('BarcodeDetector' in window)) {
-    alert('Leitura por câmera não disponível neste navegador. Use o campo de busca com leitor USB ou pesquisa manual.');
+    showToast('Leitura por câmera não disponível neste navegador.', 'error');
     return;
   }
 
   if (!navigator.mediaDevices?.getUserMedia) {
-    alert('A câmera não está disponível neste dispositivo.');
+    showToast('A câmera não está disponível neste dispositivo.', 'error');
     return;
   }
 
-  stopCameraScan();
+  scannerCard.style.display = 'block';
+  stopCameraScan(false);
+
   streamRef = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
   video.srcObject = streamRef;
 
@@ -817,12 +852,19 @@ async function startCameraScan() {
       if (!codes.length) return;
 
       const value = codes[0].rawValue;
-      const match = state.products.find((item) => item.barcode === value);
+      const match = findProductByBarcode(value);
 
       if (match) {
         addProductToCart(match.id);
-        tabEls.sales.querySelector('#sale-product-search').value = value;
-        stopCameraScan();
+        const input = tabEls.sales.querySelector('#sale-product-search');
+        if (input) {
+          input.value = value;
+        }
+        showToast('Produto adicionado à venda.', 'success');
+        stopCameraScan(true);
+      } else {
+        showToast('Produto não cadastrado.', 'error');
+        stopCameraScan(true);
       }
     } catch (error) {
       console.error(error);
@@ -830,7 +872,7 @@ async function startCameraScan() {
   }, 850);
 }
 
-function stopCameraScan() {
+function stopCameraScan(hideCard = true) {
   if (scanTimer) {
     window.clearInterval(scanTimer);
   }
@@ -842,6 +884,13 @@ function stopCameraScan() {
   }
 
   streamRef = null;
+
+  if (hideCard) {
+    const scannerCard = document.getElementById('scanner-card');
+    if (scannerCard) {
+      scannerCard.style.display = 'none';
+    }
+  }
 }
 
 function renderReports() {
